@@ -1,6 +1,7 @@
 module Accessly
   module Policy
     class Base
+      ACTIONS_MODULE = :Actions
 
       attr_reader :actor
 
@@ -11,14 +12,26 @@ module Accessly
       def self.actions(actions)
         _actions.merge!(actions)
         actions.each do |action, action_id|
-          _define_action_methods(action, action_id)
+          actions_module.module_eval do
+            define_method(:"#{action}?") do |*args|
+              _can_do_action?(action, action_id, args.first)
+            end
+          end
         end
       end
 
       def self.actions_on_objects(actions_on_objects)
         _actions_on_objects.merge!(actions_on_objects)
         actions_on_objects.each do |action, action_id|
-          _define_action_methods(action, action_id)
+          actions_module.module_eval do
+            define_method(:"#{action}?") do |*args|
+              _can_do_action?(action, action_id, args.first)
+            end
+
+            define_method(action) do |*args|
+              _list_for_action(action, action_id)
+            end
+          end
         end
       end
 
@@ -102,85 +115,22 @@ module Accessly
 
       private
 
+      def self.actions_module
+        if const_defined?(ACTIONS_MODULE, _search_ancestors = false)
+          mod = const_get(ACTIONS_MODULE)
+        else
+          mod = const_set(ACTIONS_MODULE, Module.new)
+          include mod
+        end
+
+        mod
+      end
+
       def _get_action_id(action, object_id = nil)
         if object_id.nil?
           _get_general_action_id!(action)
         else
           _get_action_on_object_id!(action)
-        end
-      end
-
-      # Determines whether the caller is trying to call an action method
-      # in the format `action_name?`. If so, this calls that method with
-      # the given arguments.
-      def method_missing(method_name, *args)
-        action_method_name = _resolve_action_method_name(method_name)
-        if action_method_name.nil?
-          super
-        else
-          send(action_method_name, *args)
-        end
-      end
-
-      # Parses an action name from a given method name of the format
-      # `action_name?` or `action_name and returns the action method
-      # or the list method name. If the method name does not follow
-      # one of those formats, this assumes the caller is not calling
-      # an action or list method and returns nil.
-      def _resolve_action_method_name(method_name)
-        action_method_match = /\A(\w+)(\??)\z/.match(method_name)
-
-        return nil if action_method_match.nil? || action_method_match[1].nil?
-
-        action_name = action_method_match[1].to_sym
-        is_predicate = action_method_match[2] == "?"
-
-        if !_action_defined?(action_name)
-          nil
-        elsif is_predicate
-          _action_method_name(action_name)
-        else
-          _action_list_method_name(action_name)
-        end
-      end
-
-      # The implementation for action methods follow the naming format
-      # `_resolve_action_name`. This is to allow child Policies to override
-      # the action method and still be able to call `super` when they
-      # need to call the base implementation of the action method.
-      def self._action_method_name(action_name)
-        "_resolve_#{action_name}"
-      end
-
-      def _action_method_name(action_name)
-        self.class._action_method_name(action_name)
-      end
-
-      # The implementation for list methods follow the naming format
-      # `_list_action_name`. This is to allow child Policies to override
-      # the list method and still be able to call `super` when they
-      # need to call the base implementation of the lsit method.
-      def self._action_list_method_name(action_name)
-        "_list_#{action_name}"
-      end
-
-      def _action_list_method_name(action_name)
-        self.class._action_list_method_name(action_name)
-      end
-
-      # Defines the action method on the Policy class for the given
-      # action name.
-      def self._define_action_methods(action, action_id)
-        unless method_defined?(_action_method_name(action))
-          define_method(_action_method_name(action)) do |*args|
-            _can_do_action?(action, action_id, args.first)
-          end
-        end
-
-        unless method_defined?(_action_list_method_name(action))
-          define_method(_action_list_method_name(action)) do |*args|
-            _list_for_action(action, action_id)
-          end
         end
       end
 
